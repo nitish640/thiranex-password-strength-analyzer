@@ -1,0 +1,6 @@
+# Never commit password hashes or bytecode
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc

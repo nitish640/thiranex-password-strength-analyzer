@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Password Strength Analyzer — Thiranex Task 1</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8;
+          --weak:#ef4444; --fair:#f59e0b; --good:#38bdf8; --strong:#22c55e; --accent:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+         background:var(--bg); color:var(--text); min-height:100vh; }
+  .wrap { max-width:720px; margin:0 auto; padding:32px 16px 64px; }
+  h1 { font-size:1.7rem; margin:0 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 24px; }
+  .card { background:var(--card); border:1px solid #334155; border-radius:14px; padding:20px; margin-bottom:16px; }
+  label { display:block; font-weight:600; margin-bottom:8px; }
+  .row { display:flex; gap:8px; }
+  input[type=password], input[type=text] { flex:1; padding:12px; font-size:1rem; border-radius:8px;
+    border:1px solid #475569; background:#0f172a; color:var(--text); min-width:0; }
+  button { padding:12px 16px; border:0; border-radius:8px; background:var(--accent); color:#082f49;
+    font-weight:700; cursor:pointer; }
+  button.secondary { background:#334155; color:var(--text); }
+  button:hover { filter:brightness(1.1); }
+  .toggle { margin-top:10px; font-size:.9rem; color:var(--muted); }
+  .bar { height:14px; background:#0f172a; border-radius:999px; overflow:hidden; margin:16px 0 8px; }
+  #fill { height:100%; width:0; background:var(--weak); transition:width .3s, background .3s; }
+  .score-line { display:flex; justify-content:space-between; font-weight:700; }
+  #label { font-size:1.2rem; }
+  .meta { color:var(--muted); font-size:.95rem; margin:6px 0; }
+  ul { padding-left:20px; margin:8px 0; }
+  li.ok::marker { content:"✓ "; color:var(--strong); }
+  li.warn::marker { content:"! "; color:var(--fair); }
+  li.fail::marker { content:"✗ "; color:var(--weak); }
+  li { margin:4px 0; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+  .stat { background:#0f172a; border-radius:8px; padding:10px; }
+  .stat b { display:block; font-size:1.05rem; }
+  .stat span { color:var(--muted); font-size:.85rem; }
+  #generated { word-break:break-all; font-family:ui-monospace,Menlo,monospace; background:#0f172a;
+    padding:12px; border-radius:8px; margin-top:10px; }
+  .warn-box { background:#451a03; border:1px solid #92400e; color:#fde68a; border-radius:8px; padding:12px; margin-top:12px; }
+  .note { color:var(--muted); font-size:.85rem; }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔐 Password Strength Analyzer</h1>
+  <p class="sub">Thiranex Cyber Security — Task 1. Scores 0–100, explains every check, estimates crack time, and suggests stronger passwords. Nothing you type leaves this page — no server, no storage of plaintext.</p>
+
+  <div class="card">
+    <label for="pw">Enter a password to test</label>
+    <div class="row">
+      <input type="password" id="pw" placeholder="Type a test password…" autocomplete="off">
+      <button id="toggle" type="button" class="secondary">Show</button>
+    </div>
+    <div class="toggle">
+      <input type="checkbox" id="saveHash"> <label for="saveHash" style="display:inline;font-weight:400;">Remember this password's hash locally (SQLite-style reuse check — demo only, stored in this browser)</label>
+    </div>
+    <div class="bar"><div id="fill"></div></div>
+    <div class="score-line"><span id="label">—</span><span id="score">Score: — / 100</span></div>
+    <p class="meta" id="entropy">Entropy: —</p>
+    <p class="meta" id="crack">Crack time (offline, 10bn guesses/sec): —</p>
+    <div class="grid">
+      <div class="stat"><b id="bLength">—</b><span>Length</span></div>
+      <div class="stat"><b id="bComplexity">—</b><span>Complexity</span></div>
+      <div class="stat"><b id="bEntropy">—</b><span>Entropy</span></div>
+      <div class="stat"><b id="bUnique">—</b><span>Uniqueness</span></div>
+    </div>
+    <ul id="feedback"></ul>
+    <div id="reuse" class="warn-box" hidden></div>
+  </div>
+
+  <div class="card">
+    <label>Need a stronger one?</label>
+    <div class="row">
+      <button id="gen" type="button">Generate strong password (16 chars)</button>
+      <button id="copy" type="button" class="secondary">Copy</button>
+    </div>
+    <div id="generated" hidden></div>
+    <p class="note">Generated with <code>crypto.getRandomValues</code> — cryptographically secure, all four character classes, no sequential or repeated patterns.</p>
+  </div>
+
+  <p class="note">Scoring mirrors <code>password_analyzer.py</code> in this project: Length ≤30, Complexity ≤30, Entropy ≤20, Uniqueness ≤20. Labels: 0–39 Weak, 40–59 Fair, 60–79 Good, 80–100 Strong. The SQLite reuse check in the CLI stores only SHA-256 hashes, never plaintext. Use test passwords only — never a real one.</p>
+  <p class="note"><a href="README.md">README</a> · <a href="TESTS.md">Test results</a></p>
+</div>
+
+<script>
+// --- Same scoring logic as password_analyzer.py (kept in sync by design) ---
+const COMMON = new Set(["123456","password","123456789","12345678","12345","1234567","1234567890","qwerty","abc123","111111","123123","admin","letmein","welcome","monkey","dragon","password1","1234","iloveyou","princess","football","sunshine","master","shadow","superman","password123","qwerty123","admin123","welcome123","123qwe","1q2w3e4r","qwertyuiop","passw0rd","charlie","aa123456","donald","computer","123456a","starwars","whatever","freedom","hello","trustno1","batman","000000","654321","123321","qazwsx","thiranex","cyber","security"]);
+const SEQS = ["abcdefghijklmnopqrstuvwxyz","0123456789","qwertyuiop","asdfghjkl","zxcvbnm"];
+const SYMBOLS = "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+function classes(pw){
+  return { lowercase:/[a-z]/.test(pw), uppercase:/[A-Z]/.test(pw),
+           digits:/[0-9]/.test(pw), symbols:[...pw].some(c=>SYMBOLS.includes(c)) };
+}
+function poolSize(pw){ const c=classes(pw); let p=0;
+  if(c.lowercase)p+=26; if(c.uppercase)p+=26; if(c.digits)p+=10; if(c.symbols)p+=32; return p; }
+function entropy(pw){ const p=poolSize(pw); return (!pw||p<=1)?0:+(pw.length*Math.log2(p)).toFixed(1); }
+function sequences(pw){ const l=pw.toLowerCase(), found=new Set();
+  for(const s of SEQS) for(let i=0;i<=s.length-3;i++){ const f=s.slice(i,i+3);
+    if(l.includes(f)||l.includes([...f].reverse().join(""))) found.add(f); }
+  return [...found]; }
+function repeats(pw){ const m=pw.match(/(.)\1{2,}/g); return m?[...new Set(m)]:[]; }
+
+function crackTime(ent){
+  if(ent<=0) return "instant";
+  let s=Math.pow(2,ent)/10_000_000_000;
+  if(s<1) return "less than a second";
+  if(s<60) return s.toFixed(1)+" seconds";
+  if(s<3600) return (s/60).toFixed(1)+" minutes";
+  if(s<86400) return (s/3600).toFixed(1)+" hours";
+  if(s<365.25*86400) return (s/86400).toFixed(1)+" days";
+  const y=s/(365.25*86400);
+  return y<1000 ? y.toLocaleString(undefined,{maximumFractionDigits:1})+" years"
+                 : y.toLocaleString(undefined,{maximumFractionDigits:0})+" years (effectively uncrackable by brute force)";
+}
+
+function analyze(pw){
+  const fb=[]; const len=pw.length;
+  let lengthScore;
+  if(len===0){ lengthScore=0; fb.push(["fail","Password is empty."]); }
+  else if(len<8){ lengthScore=len; fb.push(["fail",`Too short: ${len} characters (minimum 8).`]); }
+  else if(len<=10){ lengthScore=10; fb.push(["warn",`Short: ${len} characters — aim for 12+.`]); }
+  else if(len<=12){ lengthScore=18; fb.push(["ok",`Good length: ${len} characters.`]); }
+  else if(len<=15){ lengthScore=24; fb.push(["ok",`Long: ${len} characters.`]); }
+  else { lengthScore=30; fb.push(["ok",`Very long: ${len} characters.`]); }
+
+  const c=classes(pw); const present=Object.keys(c).filter(k=>c[k]);
+  const complexityScore=present.length*7.5;
+  for(const [k,v] of Object.entries(c)) fb.push(v?["ok",`Contains ${k}.`]:["warn",`Missing ${k}.`]);
+
+  const ent=entropy(pw);
+  const entropyScore = ent<28?0 : ent<36?5 : ent<46?10 : ent<60?15 : 20;
+
+  let uniqueScore=20; const low=pw.toLowerCase();
+  if(COMMON.has(low)){ uniqueScore-=20; fb.push(["fail","This is one of the most common passwords — attackers try it first."]); }
+  else if(["password","admin","qwerty","welcome","letmein"].some(w=>low.includes(w))){
+    uniqueScore-=10; fb.push(["fail","Contains a very common word (password/admin/qwerty/welcome)."]); }
+  const seqs=sequences(pw);
+  if(seqs.length){ uniqueScore-=8; fb.push(["fail",`Contains sequential/keyboard pattern(s): ${seqs.slice(0,3).join(", ")}.`]); }
+  const reps=repeats(pw);
+  if(reps.length){ uniqueScore-=8; fb.push(["fail",`Repeated characters: ${reps.slice(0,3).join(", ")}.`]); }
+  uniqueScore=Math.max(0,uniqueScore);
+  if(uniqueScore===20) fb.push(["ok","No common-password, sequential or repeated pattern found."]);
+
+  let score=Math.max(0,Math.min(100,Math.round(lengthScore+complexityScore+entropyScore+uniqueScore)));
+  // A password under 8 characters can never be better than Weak.
+  if(len<8) score=Math.min(score,39);
+  const label = score<40?"Weak" : score<60?"Fair" : score<80?"Good" : "Strong";
+  return {score,label,ent,present,feedback:fb,
+          breakdown:{length:lengthScore,complexity:complexityScore,entropy:entropyScore,uniqueness:uniqueScore}};
+}
+
+async function sha256Hex(text){
+  const buf=await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,"0")).join("");
+}
+function storedHashes(){ try{ return JSON.parse(localStorage.getItem("pwHashes")||"[]"); }catch{ return []; } }
+
+const pw=document.getElementById("pw"), fill=document.getElementById("fill"),
+  labelEl=document.getElementById("label"), scoreEl=document.getElementById("score"),
+  entEl=document.getElementById("entropy"), crackEl=document.getElementById("crack"),
+  fbEl=document.getElementById("feedback"), reuseEl=document.getElementById("reuse");
+
+async function render(){
+  const v=pw.value;
+  if(!v){ fill.style.width="0%"; labelEl.textContent="—"; scoreEl.textContent="Score: — / 100";
+    entEl.textContent="Entropy: —"; crackEl.textContent="Crack time (offline, 10bn guesses/sec): —";
+    fbEl.innerHTML=""; reuseEl.hidden=true;
+    document.getElementById("bLength").textContent="—"; document.getElementById("bComplexity").textContent="—";
+    document.getElementById("bEntropy").textContent="—"; document.getElementById("bUnique").textContent="—"; return; }
+  const r=analyze(v);
+  const color = r.label==="Weak"?"var(--weak)" : r.label==="Fair"?"var(--fair)" : r.label==="Good"?"var(--good)" : "var(--strong)";
+  fill.style.width=r.score+"%"; fill.style.background=color;
+  labelEl.textContent=r.label; labelEl.style.color=color;
+  scoreEl.textContent=`Score: ${r.score} / 100`;
+  entEl.textContent=`Entropy: ${r.ent} bits`;
+  crackEl.textContent=`Crack time (offline, 10bn guesses/sec): ${crackTime(r.ent)}`;
+  document.getElementById("bLength").textContent=r.breakdown.length+" / 30";
+  document.getElementById("bComplexity").textContent=r.breakdown.complexity+" / 30";
+  document.getElementById("bEntropy").textContent=r.breakdown.entropy+" / 20";
+  document.getElementById("bUnique").textContent=r.breakdown.uniqueness+" / 20";
+  fbEl.innerHTML=r.feedback.map(([lvl,msg])=>`<li class="${lvl}">${msg}</li>`).join("");
+  // Reuse check (browser-local demo of the CLI's SQLite check)
+  if(document.getElementById("saveHash").checked){
+    const h=await sha256Hex(v); const hashes=storedHashes();
+    if(hashes.includes(h)){ reuseEl.hidden=false; reuseEl.textContent="⚠ WARNING — this password was used before (hash match in this browser). Pick a new one."; }
+    else { hashes.push(h); localStorage.setItem("pwHashes", JSON.stringify(hashes));
+      reuseEl.hidden=true; }
+  } else reuseEl.hidden=true;
+}
+pw.addEventListener("input", render);
+document.getElementById("saveHash").addEventListener("change", render);
+document.getElementById("toggle").addEventListener("click", e=>{
+  const show = pw.type==="password"; pw.type = show?"text":"password"; e.target.textContent = show?"Hide":"Show"; });
+
+function generate(){
+  const all="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"+SYMBOLS;
+  const arr=new Uint32Array(16); let out="";
+  do { crypto.getRandomValues(arr); out=[...arr].map(n=>all[n%all.length]).join(""); }
+  while(!(classes(out).lowercase&&classes(out).uppercase&&classes(out).digits&&classes(out).symbols)
+        || sequences(out).length || repeats(out).length);
+  return out;
+}
+document.getElementById("gen").addEventListener("click", ()=>{
+  const g=generate(); const el=document.getElementById("generated");
+  el.textContent=g; el.hidden=false; pw.value=g; render(); });
+document.getElementById("copy").addEventListener("click", async ()=>{
+  const el=document.getElementById("generated"); if(el.hidden) return;
+  await navigator.clipboard.writeText(el.textContent).catch(()=>{});
+  document.getElementById("copy").textContent="Copied ✓";
+  setTimeout(()=>document.getElementById("copy").textContent="Copy",1500); });
+</script>
+</body>
+</html>
